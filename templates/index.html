@@ -1,0 +1,179 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shutterside Image Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-panel">
+        <div class="brand-block">
+          <p class="eyebrow">Localhost Image Editor</p>
+          <h1>Shutterside</h1>
+          <p class="brand-copy">
+            Crop, image adjustments, perspective correction, background removal, and export
+            as PNG or JPG.
+          </p>
+        </div>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>File</h2>
+            <span class="mini-pill">local</span>
+          </div>
+          <label class="upload-zone" for="fileInput" id="dropZone">
+            <span class="upload-title">Load image</span>
+            <span class="upload-copy">Drop a PNG or JPG here, or click to browse</span>
+          </label>
+          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/jpg">
+          <button class="secondary-btn" id="resetAllBtn" type="button">Reset to original</button>
+        </section>
+
+        <section class="card status-card">
+          <div class="card-head">
+            <h2>Status</h2>
+            <span class="status-pill" id="statusBadge">Idle</span>
+          </div>
+          <p id="statusText">Load an image to start editing.</p>
+        </section>
+
+        <section class="card histogram-card" id="histogramCard">
+          <div class="card-head">
+            <h2>Histogram</h2>
+            <button class="ghost-btn" id="histogramToggleBtn" type="button">hide</button>
+          </div>
+          <canvas id="histogramCanvas" width="256" height="72"></canvas>
+          <div class="clip-row">
+            <span class="clip-indicator" id="clipShadow">▲ Shadows</span>
+            <span class="clip-indicator" id="clipHighlight">Highlights ▲</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Adjustments</h2>
+            <button class="ghost-btn" id="resetAdjustmentsBtn" type="button">Reset all</button>
+          </div>
+
+          <div class="slider-grid">
+            <label class="slider-control">
+              <span>Brightness</span>
+              <output id="brightnessValue">0</output>
+              <input id="brightness" name="brightness" type="range" min="-100" max="100" value="0">
+            </label>
+
+            <label class="slider-control">
+              <span>Contrast</span>
+              <output id="contrastValue">0</output>
+              <input id="contrast" name="contrast" type="range" min="-100" max="100" value="0">
+            </label>
+
+            <label class="slider-control">
+              <span>Saturation</span>
+              <output id="saturationValue">0</output>
+              <input id="saturation" name="saturation" type="range" min="-100" max="100" value="0">
+            </label>
+
+            <label class="slider-control">
+              <span>Warmth</span>
+              <output id="warmthValue">0</output>
+              <input id="warmth" name="warmth" type="range" min="-100" max="100" value="0">
+            </label>
+
+            <label class="slider-control">
+              <span>Grayscale</span>
+              <output id="grayscaleValue">0</output>
+              <input id="grayscale" name="grayscale" type="range" min="0" max="100" value="0">
+            </label>
+          </div>
+
+          <button class="primary-btn" id="applyAdjustmentsBtn" type="button">Bake adjustments</button>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Export</h2>
+            <span class="mini-pill">png / jpg</span>
+          </div>
+          <div class="slider-grid export-grid">
+            <label class="field-control">
+              <span>Format</span>
+              <select id="exportFormat">
+                <option value="png">PNG</option>
+                <option value="jpg">JPG</option>
+              </select>
+            </label>
+
+            <label class="slider-control">
+              <span>Compression</span>
+              <output id="exportCompressionValue">35%</output>
+              <input id="exportCompression" type="range" min="0" max="100" value="35">
+            </label>
+          </div>
+
+          <p class="export-note" id="exportHint">
+            PNG is lossless. Higher compression means a smaller file, not lower quality.
+          </p>
+
+          <div class="export-meta">
+            <span class="info-chip" id="exportDimensions">-</span>
+            <span class="info-chip" id="exportEstimate">Estimating size...</span>
+          </div>
+
+          <button class="primary-btn" id="exportSaveBtn" type="button">Save file</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="toolbar-card">
+          <div class="tool-row">
+            <button class="tool-btn active" data-mode="preview" type="button">Preview</button>
+            <button class="tool-btn" data-mode="crop" type="button">Crop</button>
+            <button class="tool-btn" data-mode="perspective" type="button">Perspective</button>
+            <button class="tool-btn accent" id="applyToolBtn" type="button">Apply tool</button>
+            <button class="tool-btn warn" id="removeBgBtn" type="button">Remove background</button>
+          </div>
+          <p class="toolbar-hint" id="toolHint">
+            Load an image, then pick a tool.
+          </p>
+        </section>
+
+        <section class="canvas-card" id="canvasCard">
+          <div class="canvas-viewport" id="canvasViewport">
+            <div class="canvas-stack" id="canvasStack">
+              <canvas id="imageCanvas"></canvas>
+              <canvas id="overlayCanvas"></canvas>
+            </div>
+
+            <div class="empty-state" id="emptyState">
+              <h3>Ready for your image</h3>
+              <p>
+                Use the upload on the left or drag a file directly into this area.
+              </p>
+            </div>
+
+            <div class="loading-overlay" id="loadingOverlay">
+              <div class="spinner"></div>
+              <p id="loadingText">Processing image...</p>
+            </div>
+          </div>
+
+          <div class="workspace-footer">
+            <span class="info-chip">Crop</span>
+            <span class="info-chip">Image Adjustments</span>
+            <span class="info-chip">Perspective Warp</span>
+            <span class="info-chip">Background Removal</span>
+            <span class="info-chip zoom-chip" id="zoomLevel" title="Double-click to reset">100%</span>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}" type="module"></script>
+  </body>
+</html>
