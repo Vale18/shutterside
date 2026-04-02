@@ -1,4 +1,5 @@
 import * as api from "./api.js";
+import { buildCompositeLUTs, isToneCurveIdentity } from "./tonecurve.js";
 import {
   state,
   hasImage,
@@ -40,6 +41,14 @@ export function applyAdjustmentsToImageData(imageData, adjustments) {
   const warmthOffset = (adjustments.warmth / 100) * 48;
   const grayscaleMix = adjustments.grayscale / 100;
 
+  // Pre-compute tone curve LUTs once outside the pixel loop
+  const tc = adjustments.toneCurve;
+  const hasCurve = tc && !isToneCurveIdentity(tc);
+  let lutR, lutG, lutB;
+  if (hasCurve) {
+    ({ lutR, lutG, lutB } = buildCompositeLUTs(tc.rgb, tc.r, tc.g, tc.b));
+  }
+
   for (let index = 0; index < pixels.length; index += 4) {
     let red = pixels[index];
     let green = pixels[index + 1];
@@ -52,6 +61,12 @@ export function applyAdjustmentsToImageData(imageData, adjustments) {
     red = contrastFactor * (red - 128) + 128;
     green = contrastFactor * (green - 128) + 128;
     blue = contrastFactor * (blue - 128) + 128;
+
+    if (hasCurve) {
+      red   = lutR[clamp(Math.round(red),   0, 255)];
+      green = lutG[clamp(Math.round(green), 0, 255)];
+      blue  = lutB[clamp(Math.round(blue),  0, 255)];
+    }
 
     let luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
     red = luma + (red - luma) * saturationFactor;
@@ -79,7 +94,7 @@ export function buildProcessedCanvas(sourceCanvas, adjustments) {
   const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
   tempCtx.drawImage(sourceCanvas, 0, 0);
 
-  if (Object.values(adjustments).some((value) => value !== 0)) {
+  if (Object.entries(adjustments).some(([k, v]) => k === "toneCurve" ? !isToneCurveIdentity(v) : v !== 0)) {
     const frame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
     applyAdjustmentsToImageData(frame, adjustments);
     tempCtx.putImageData(frame, 0, 0);
@@ -220,23 +235,111 @@ export function cropImage() {
     bakeAdjustmentsIntoBase();
   }
 
-  const x = Math.round(state.cropRect.x * state.baseCanvas.width);
-  const y = Math.round(state.cropRect.y * state.baseCanvas.height);
-  const width = Math.max(1, Math.round(state.cropRect.w * state.baseCanvas.width));
-  const height = Math.max(1, Math.round(state.cropRect.h * state.baseCanvas.height));
+  let sourceCanvas = state.baseCanvas;
+
+  if (state.cropRotation !== 0) {
+    const sw = state.baseCanvas.width;
+    const sh = state.baseCanvas.height;
+    const rad = state.cropRotation * Math.PI / 180;
+    const cos = Math.abs(Math.cos(rad));
+    const sin = Math.abs(Math.sin(rad));
+    const newW = Math.ceil(sw * cos + sh * sin);
+    const newH = Math.ceil(sw * sin + sh * cos);
+
+    const rotCanvas = document.createElement("canvas");
+    rotCanvas.width = newW;
+    rotCanvas.height = newH;
+    const rotCtx = rotCanvas.getContext("2d");
+    rotCtx.translate(newW / 2, newH / 2);
+    rotCtx.rotate(rad);
+    rotCtx.drawImage(state.baseCanvas, -sw / 2, -sh / 2);
+    sourceCanvas = rotCanvas;
+  }
+
+  const x = Math.round(state.cropRect.x * sourceCanvas.width);
+  const y = Math.round(state.cropRect.y * sourceCanvas.height);
+  const width = Math.max(1, Math.round(state.cropRect.w * sourceCanvas.width));
+  const height = Math.max(1, Math.round(state.cropRect.h * sourceCanvas.height));
 
   const nextCanvas = document.createElement("canvas");
   nextCanvas.width = width;
   nextCanvas.height = height;
   const nextCtx = nextCanvas.getContext("2d");
-  nextCtx.drawImage(state.baseCanvas, x, y, width, height, 0, 0, width, height);
+  nextCtx.drawImage(sourceCanvas, x, y, width, height, 0, 0, width, height);
 
   replaceBaseCanvas(nextCanvas);
   state.cropRect = null;
+  state.cropRotation = 0;
+  state.cropAspectRatio = null;
   resetHistory();
   pushHistory("Crop applied");
   _ui.setMode("preview");
   _ui.setStatus("Ready", `Crop applied: ${width} x ${height} pixels.`, "ready");
+  _ui.scheduleRender();
+  _ui.scheduleExportEstimate();
+}
+
+export function rotateImage(direction) {
+  if (!hasImage()) return;
+
+  if (hasActiveAdjustments()) {
+    bakeAdjustmentsIntoBase();
+  }
+
+  const sw = state.baseCanvas.width;
+  const sh = state.baseCanvas.height;
+  const nextCanvas = document.createElement("canvas");
+  nextCanvas.width = sh;
+  nextCanvas.height = sw;
+  const ctx = nextCanvas.getContext("2d");
+
+  if (direction === 1) {
+    ctx.translate(sh, 0);
+    ctx.rotate(Math.PI / 2);
+  } else {
+    ctx.translate(0, sw);
+    ctx.rotate(-Math.PI / 2);
+  }
+  ctx.drawImage(state.baseCanvas, 0, 0);
+
+  replaceBaseCanvas(nextCanvas);
+  state.cropRect = null;
+  resetHistory();
+  pushHistory(direction === 1 ? "Rotiert 90° im Uhrzeigersinn" : "Rotiert 90° gegen Uhrzeigersinn");
+  _ui.setMode("preview");
+  _ui.setStatus("Ready", `Bild rotiert: ${nextCanvas.width} × ${nextCanvas.height} Pixel.`, "ready");
+  _ui.scheduleRender();
+  _ui.scheduleExportEstimate();
+}
+
+export function flipImage(axis) {
+  if (!hasImage()) return;
+
+  if (hasActiveAdjustments()) {
+    bakeAdjustmentsIntoBase();
+  }
+
+  const sw = state.baseCanvas.width;
+  const sh = state.baseCanvas.height;
+  const nextCanvas = document.createElement("canvas");
+  nextCanvas.width = sw;
+  nextCanvas.height = sh;
+  const ctx = nextCanvas.getContext("2d");
+
+  if (axis === "h") {
+    ctx.translate(sw, 0);
+    ctx.scale(-1, 1);
+  } else {
+    ctx.translate(0, sh);
+    ctx.scale(1, -1);
+  }
+  ctx.drawImage(state.baseCanvas, 0, 0);
+
+  replaceBaseCanvas(nextCanvas);
+  state.cropRect = null;
+  resetHistory();
+  pushHistory(axis === "h" ? "Horizontal gespiegelt" : "Vertikal gespiegelt");
+  _ui.setStatus("Ready", "Bild gespiegelt.", "ready");
   _ui.scheduleRender();
   _ui.scheduleExportEstimate();
 }

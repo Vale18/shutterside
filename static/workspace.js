@@ -1,8 +1,17 @@
 import * as api from "./api.js";
+import { cloneToneCurve, isToneCurveIdentity } from "./tonecurve.js";
+
+export const DEFAULT_TONE_CURVE = {
+  rgb: [[0, 0], [255, 255]],
+  r:   [[0, 0], [255, 255]],
+  g:   [[0, 0], [255, 255]],
+  b:   [[0, 0], [255, 255]],
+};
 
 const DEFAULT_ADJUSTMENTS = {
   brightness: 0,
   contrast: 0,
+  toneCurve: DEFAULT_TONE_CURVE,
   saturation: 0,
   warmth: 0,
   grayscale: 0,
@@ -16,6 +25,8 @@ export const state = {
   originalName: "image",
   originalDataUrl: null,
   cropRect: null,
+  cropAspectRatio: null,
+  cropRotation: 0,
   perspectivePoints: defaultPerspectivePoints(),
   drag: null,
   previewWidth: 0,
@@ -55,14 +66,19 @@ export function hasImage() {
 }
 
 export function hasActiveAdjustments() {
-  return Object.entries(DEFAULT_ADJUSTMENTS).some(([key, value]) => state.adjustments[key] !== value);
+  return Object.entries(DEFAULT_ADJUSTMENTS).some(([key, defaultValue]) => {
+    if (key === "toneCurve") return !isToneCurveIdentity(state.adjustments.toneCurve);
+    return state.adjustments[key] !== defaultValue;
+  });
 }
 
 export function resetEditState() {
   state.cropRect = null;
+  state.cropAspectRatio = null;
+  state.cropRotation = 0;
   state.perspectivePoints = defaultPerspectivePoints();
   state.drag = null;
-  state.adjustments = { ...DEFAULT_ADJUSTMENTS };
+  state.adjustments = { ...DEFAULT_ADJUSTMENTS, toneCurve: cloneToneCurve(DEFAULT_TONE_CURVE) };
 }
 
 export function drawToBaseCanvas(image) {
@@ -108,7 +124,7 @@ export async function deleteSession() {
 // ─── History ──────────────────────────────────────────────────────────────────
 
 export function snapshotEditState() {
-  return { ...state.adjustments };
+  return { ...state.adjustments, toneCurve: cloneToneCurve(state.adjustments.toneCurve) };
 }
 
 export function pushHistory(label) {
@@ -138,6 +154,6 @@ export function stepHistory(direction) {
   if (direction === 1 && !canRedo()) return null;
   state.historyIndex += direction;
   const snapshot = state.history[state.historyIndex];
-  state.adjustments = { ...snapshot.editState };
+  state.adjustments = { ...snapshot.editState, toneCurve: cloneToneCurve(snapshot.editState.toneCurve) };
   return snapshot;
 }

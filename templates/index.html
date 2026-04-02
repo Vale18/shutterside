@@ -54,6 +54,25 @@
           </div>
         </section>
 
+        <section class="card tone-curve-card" id="toneCurveCard">
+          <div class="card-head">
+            <h2>Tone Curve</h2>
+            <button class="ghost-btn" id="toneCurveResetBtn" type="button">Reset</button>
+          </div>
+          <div class="tone-curve-channels">
+            <button class="tc-channel-btn active" data-channel="rgb" type="button">RGB</button>
+            <button class="tc-channel-btn" data-channel="r" type="button">R</button>
+            <button class="tc-channel-btn" data-channel="g" type="button">G</button>
+            <button class="tc-channel-btn" data-channel="b" type="button">B</button>
+          </div>
+          <canvas id="toneCurveCanvas" width="256" height="180"></canvas>
+          <div class="tone-curve-presets">
+            <button class="tc-preset-btn" data-preset="linear" type="button">Linear</button>
+            <button class="tc-preset-btn" data-preset="mediumContrast" type="button">Medium</button>
+            <button class="tc-preset-btn" data-preset="strongContrast" type="button">Strong</button>
+          </div>
+        </section>
+
         <section class="card">
           <div class="card-head">
             <h2>Adjustments</h2>
@@ -134,9 +153,30 @@
           <div class="tool-row">
             <button class="tool-btn active" data-mode="preview" type="button">Preview</button>
             <button class="tool-btn" data-mode="crop" type="button">Crop</button>
+            <button class="tool-btn" id="rotateCcwBtn" type="button" title="90° gegen Uhrzeigersinn">&#x21ba;</button>
+            <button class="tool-btn" id="rotateCwBtn" type="button" title="90° im Uhrzeigersinn">&#x21bb;</button>
+            <button class="tool-btn" id="flipHBtn" type="button" title="Horizontal spiegeln">&#x2194;</button>
+            <button class="tool-btn" id="flipVBtn" type="button" title="Vertikal spiegeln">&#x2195;</button>
             <button class="tool-btn" data-mode="perspective" type="button">Perspective</button>
             <button class="tool-btn accent" id="applyToolBtn" type="button">Apply tool</button>
             <button class="tool-btn warn" id="removeBgBtn" type="button">Remove background</button>
+          </div>
+          <div class="crop-options" id="cropOptions" style="display: none;">
+            <div class="crop-options-row">
+              <span class="crop-options-label">Ratio:</span>
+              <button class="ratio-btn active" data-ratio="free" type="button">Frei</button>
+              <button class="ratio-btn" data-ratio="1:1" type="button">1:1</button>
+              <button class="ratio-btn" data-ratio="4:3" type="button">4:3</button>
+              <button class="ratio-btn" data-ratio="3:2" type="button">3:2</button>
+              <button class="ratio-btn" data-ratio="16:9" type="button">16:9</button>
+              <button class="ratio-btn" id="flipRatioBtn" type="button" title="Hoch-/Querformat tauschen">&#x21c5;</button>
+            </div>
+            <div class="crop-options-row">
+              <span class="crop-options-label">Rotation:</span>
+              <input type="range" id="cropRotationSlider" min="-45" max="45" step="0.1" value="0">
+              <span class="rotation-readout" id="rotationReadout">0.0°</span>
+              <button class="ratio-btn" id="resetRotationBtn" type="button" title="Rotation zurücksetzen">&#x21ba; 0°</button>
+            </div>
           </div>
           <p class="toolbar-hint" id="toolHint">
             Load an image, then pick a tool.
