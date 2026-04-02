@@ -1,6 +1,7 @@
 # Shutterside
 
 A local-first browser image editor. Load a photo, make adjustments, export — nothing leaves your machine, no ads, 100% free.
+Similar to software like lightroom but free!
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-lightgrey) ![Vanilla JS](https://img.shields.io/badge/JS-ES%20Modules-yellow)
 ![thumbnail](./examples/Screenshot%202026-04-02%20142058.png)
