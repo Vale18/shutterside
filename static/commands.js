@@ -12,10 +12,10 @@ import {
   defaultPerspectivePoints,
   pushHistory,
   resetHistory,
-  snapshotEditState,
   deleteSession,
   createSession,
-  DEFAULT_ADJUSTMENTS,
+  lastCommittedEditState,
+  adjustmentsDiffer,
 } from "./workspace.js";
 
 // ─── UI callbacks (injected by app.js to avoid circular deps) ─────────────────
@@ -109,14 +109,20 @@ function getPreparedExportCanvas() {
     : state.baseCanvas;
 }
 
-function bakeAdjustmentsIntoBase() {
-  if (!hasActiveAdjustments()) return false;
-  pushHistory("Adjustments baked");
-  const processed = buildProcessedCanvas(state.baseCanvas, state.adjustments);
-  replaceBaseCanvas(processed);
-  _ui.resetAdjustments(false);
-  _ui.setStatus("Ready", "Adjustments have been baked into the image.", "ready");
-  return true;
+async function loadCanvasFromDataUrl(dataUrl) {
+  const image = await createImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  canvas.getContext("2d").drawImage(image, 0, 0);
+  return canvas;
+}
+
+function commitPendingAdjustments() {
+  if (!hasImage()) return;
+  if (!adjustmentsDiffer(state.adjustments, lastCommittedEditState)) return;
+  pushHistory("Adjustments");
+  _ui.onHistoryChange?.();
 }
 
 // ─── Shared async operation wrapper ───────────────────────────────────────────
@@ -131,15 +137,18 @@ async function runServerOperation({ busyMsg, statusMsg, apiFn, historyLabel }) {
   _ui.setStatus("Working", statusMsg, "busy");
   await nextFrame();
 
-  if (hasActiveAdjustments()) {
-    bakeAdjustmentsIntoBase();
-  }
+  commitPendingAdjustments();
 
   try {
     const resultDataUrl = await apiFn();
-    await loadImageFromDataUrl(resultDataUrl, { rememberOriginal: false });
-    state.history = [{ editState: snapshotEditState(), label: historyLabel }];
-    state.historyIndex = 0;
+    const canvas = await loadCanvasFromDataUrl(resultDataUrl);
+    replaceBaseCanvas(canvas);
+    pushHistory(historyLabel, { baseChanged: true });
+    _ui.onHistoryChange?.();
+    _ui.setMode("preview");
+    _ui.updateUiState();
+    _ui.scheduleRender();
+    _ui.scheduleExportEstimate();
     _ui.setStatus("Ready", `${historyLabel} completed.`, "ready");
   } catch (error) {
     _ui.setStatus("Error", error.message, "idle");
@@ -186,7 +195,7 @@ export async function loadImageFromDataUrl(dataUrl, options = {}) {
 
   resetEditState();
   resetHistory();
-  pushHistory("Image loaded");
+  pushHistory("Image loaded", { baseChanged: true });
 
   if (rememberOriginal) {
     deleteSession().then(() => createSession(dataUrl));
@@ -210,30 +219,13 @@ export function clearWorkspace() {
 
 // ─── User commands ────────────────────────────────────────────────────────────
 
-export async function applyAdjustments() {
-  if (!hasImage() || !hasActiveAdjustments()) return;
-
-  _ui.setBusy(true, "Baking adjustments...");
-  _ui.setStatus("Working", "Adjustments are being permanently applied to the image.", "busy");
-  await nextFrame();
-
-  bakeAdjustmentsIntoBase();
-
-  _ui.setBusy(false);
-  _ui.updateUiState();
-  _ui.scheduleRender();
-  _ui.scheduleExportEstimate();
-}
-
 export function cropImage() {
   if (!state.cropRect || state.cropRect.w < 0.01 || state.cropRect.h < 0.01) {
     _ui.setStatus("Note", "Draw a visible crop rectangle first.", "idle");
     return;
   }
 
-  if (hasActiveAdjustments()) {
-    bakeAdjustmentsIntoBase();
-  }
+  commitPendingAdjustments();
 
   let sourceCanvas = state.baseCanvas;
 
@@ -271,8 +263,8 @@ export function cropImage() {
   state.cropRect = null;
   state.cropRotation = 0;
   state.cropAspectRatio = null;
-  resetHistory();
-  pushHistory("Crop applied");
+  pushHistory("Crop applied", { baseChanged: true });
+  _ui.onHistoryChange?.();
   _ui.setMode("preview");
   _ui.setStatus("Ready", `Crop applied: ${width} x ${height} pixels.`, "ready");
   _ui.scheduleRender();
@@ -282,9 +274,7 @@ export function cropImage() {
 export function rotateImage(direction) {
   if (!hasImage()) return;
 
-  if (hasActiveAdjustments()) {
-    bakeAdjustmentsIntoBase();
-  }
+  commitPendingAdjustments();
 
   const sw = state.baseCanvas.width;
   const sh = state.baseCanvas.height;
@@ -304,10 +294,10 @@ export function rotateImage(direction) {
 
   replaceBaseCanvas(nextCanvas);
   state.cropRect = null;
-  resetHistory();
-  pushHistory(direction === 1 ? "Rotiert 90° im Uhrzeigersinn" : "Rotiert 90° gegen Uhrzeigersinn");
+  pushHistory(direction === 1 ? "Rotate 90° CW" : "Rotate 90° CCW", { baseChanged: true });
+  _ui.onHistoryChange?.();
   _ui.setMode("preview");
-  _ui.setStatus("Ready", `Bild rotiert: ${nextCanvas.width} × ${nextCanvas.height} Pixel.`, "ready");
+  _ui.setStatus("Ready", `Image rotated: ${nextCanvas.width} × ${nextCanvas.height} px.`, "ready");
   _ui.scheduleRender();
   _ui.scheduleExportEstimate();
 }
@@ -315,9 +305,7 @@ export function rotateImage(direction) {
 export function flipImage(axis) {
   if (!hasImage()) return;
 
-  if (hasActiveAdjustments()) {
-    bakeAdjustmentsIntoBase();
-  }
+  commitPendingAdjustments();
 
   const sw = state.baseCanvas.width;
   const sh = state.baseCanvas.height;
@@ -337,9 +325,9 @@ export function flipImage(axis) {
 
   replaceBaseCanvas(nextCanvas);
   state.cropRect = null;
-  resetHistory();
-  pushHistory(axis === "h" ? "Horizontal gespiegelt" : "Vertikal gespiegelt");
-  _ui.setStatus("Ready", "Bild gespiegelt.", "ready");
+  pushHistory(axis === "h" ? "Flip horizontal" : "Flip vertical", { baseChanged: true });
+  _ui.onHistoryChange?.();
+  _ui.setStatus("Ready", "Image flipped.", "ready");
   _ui.scheduleRender();
   _ui.scheduleExportEstimate();
 }

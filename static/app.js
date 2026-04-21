@@ -5,6 +5,11 @@ import {
   hasActiveAdjustments,
   defaultPerspectivePoints,
   stepHistory,
+  jumpHistory,
+  pushHistory,
+  lastCommittedEditState,
+  slidersDiffer,
+  toneCurveDiffers,
 } from "./workspace.js";
 
 import {
@@ -26,7 +31,6 @@ import {
   injectUI,
   applyAdjustmentsToImageData,
   handleFile,
-  applyAdjustments,
   cropImage,
   rotateImage,
   flipImage,
@@ -44,7 +48,6 @@ const fileInput = document.getElementById("fileInput");
 const dropZone = document.getElementById("dropZone");
 const resetAllBtn = document.getElementById("resetAllBtn");
 const resetAdjustmentsBtn = document.getElementById("resetAdjustmentsBtn");
-const applyAdjustmentsBtn = document.getElementById("applyAdjustmentsBtn");
 const applyToolBtn = document.getElementById("applyToolBtn");
 const removeBgBtn = document.getElementById("removeBgBtn");
 const exportFormatSelect = document.getElementById("exportFormat");
@@ -82,6 +85,10 @@ const tcPresetBtns = Array.from(document.querySelectorAll(".tc-preset-btn"));
 const histogramCanvas = document.getElementById("histogramCanvas");
 const histogramCard = document.getElementById("histogramCard");
 const histogramToggleBtn = document.getElementById("histogramToggleBtn");
+const historyList = document.getElementById("historyList");
+const beforeAfterBtn = document.getElementById("beforeAfterBtn");
+const adjustmentsCard = document.getElementById("adjustmentsCard");
+const toneCurveCardEl = document.getElementById("toneCurveCard");
 const clipShadow = document.getElementById("clipShadow");
 const clipHighlight = document.getElementById("clipHighlight");
 const zoomLevelChip = document.getElementById("zoomLevel");
@@ -92,6 +99,8 @@ const adjustmentInputs = [
   document.getElementById("warmth"),
   document.getElementById("grayscale"),
 ];
+
+let _adjustedFrameCache = null;
 
 let _spaceHeld = false;
 let _panDragging = false;
@@ -150,6 +159,7 @@ function setBusy(isBusy, message = "Processing image...") {
 }
 
 function setMode(mode) {
+  commitPendingAdjustments();
   state.mode = mode;
   if (mode === "perspective" && !state.perspectivePoints?.length) {
     state.perspectivePoints = defaultPerspectivePoints();
@@ -184,7 +194,6 @@ function setMode(mode) {
 
 function updateUiState() {
   const ready = hasImage();
-  applyAdjustmentsBtn.disabled = !ready || state.busy || !hasActiveAdjustments();
   resetAllBtn.disabled = !state.originalDataUrl || state.busy;
   resetAdjustmentsBtn.disabled = !ready || state.busy;
   removeBgBtn.disabled = !ready || state.busy;
@@ -236,11 +245,19 @@ function syncExportControls() {
     "JPG uses lossy compression. Higher compression makes the file smaller but reduces quality. Transparency is flattened to white.";
 }
 
+function commitPendingAdjustments() {
+  if (!hasImage() || state.busy) return;
+  if (!slidersDiffer(state.adjustments, lastCommittedEditState) && !toneCurveDiffers(state.adjustments, lastCommittedEditState)) return;
+  pushHistory("Adjustments");
+  renderHistoryPanel();
+}
+
 function resetAdjustments(render = true) {
   adjustmentInputs.forEach((input) => {
     input.value = String(DEFAULT_ADJUSTMENTS[input.name]);
   });
   state.adjustments = { ...DEFAULT_ADJUSTMENTS, toneCurve: cloneToneCurve(DEFAULT_TONE_CURVE) };
+  _adjustedFrameCache = null;
   syncSliderOutputs();
   drawToneCurve();
   if (render) {
@@ -292,6 +309,51 @@ function updateHistogram() {
   clipHighlight.classList.toggle("is-clipping", clipping.highlight);
 
   drawHistogram(histogramCanvas, bins);
+}
+
+// ─── History panel ───────────────────────────────────────────────────────────
+
+function onHistoryChange() {
+  _adjustedFrameCache = null;
+  renderHistoryPanel();
+}
+
+function renderHistoryPanel() {
+  historyList.innerHTML = "";
+  state.history.forEach((entry, index) => {
+    const li = document.createElement("li");
+    li.className = "history-item";
+    if (index === state.historyIndex) li.classList.add("is-active");
+    li.textContent = entry.label;
+    li.addEventListener("click", () => {
+      if (state.busy) return;
+      const snapshot = jumpHistory(index);
+      if (!snapshot) return;
+      _adjustedFrameCache = null;
+      syncInputsFromEditState();
+      syncSliderOutputs();
+      drawToneCurve();
+      updateUiState();
+      scheduleRender();
+      scheduleExportEstimate();
+      setStatus("History", snapshot.label, "ready");
+      renderHistoryPanel();
+    });
+    historyList.appendChild(li);
+  });
+}
+
+// ─── Before / After toggle ────────────────────────────────────────────────────
+
+function toggleBeforeAfter() {
+  if (!hasImage()) return;
+  state.beforeAfterMode = !state.beforeAfterMode;
+  if (!state.beforeAfterMode) {
+    _adjustedFrameCache = null;
+    state.beforeAfterSplitX = null;
+  }
+  beforeAfterBtn.classList.toggle("active", state.beforeAfterMode);
+  scheduleRender();
 }
 
 // ─── Tone curve drawing ───────────────────────────────────────────────────────
@@ -476,18 +538,54 @@ function renderPreview() {
     imageCtx.drawImage(state.baseCanvas, 0, 0, width, height);
   }
 
-  if (hasActiveAdjustments()) {
-    const frame = imageCtx.getImageData(0, 0, width, height);
-    applyAdjustmentsToImageData(frame, state.adjustments);
-    imageCtx.putImageData(frame, 0, 0);
+  if (state.beforeAfterMode) {
+    if (state.beforeAfterSplitX !== null) {
+      if (!_adjustedFrameCache || _adjustedFrameCache.width !== width || _adjustedFrameCache.height !== height) {
+        const frame = imageCtx.getImageData(0, 0, width, height);
+        if (hasActiveAdjustments()) applyAdjustmentsToImageData(frame, state.adjustments);
+        _adjustedFrameCache = frame;
+      }
+      const x = Math.round(state.beforeAfterSplitX);
+      if (x < width) imageCtx.putImageData(_adjustedFrameCache, 0, 0, x, 0, width - x, height);
+    }
+    drawBeforeAfterOverlay();
+  } else {
+    if (hasActiveAdjustments()) {
+      const frame = imageCtx.getImageData(0, 0, width, height);
+      applyAdjustmentsToImageData(frame, state.adjustments);
+      imageCtx.putImageData(frame, 0, 0);
+    }
+    drawOverlay();
   }
 
-  drawOverlay();
   updateHistogram();
   drawToneCurve();
 }
 
 // ─── Overlay drawing ──────────────────────────────────────────────────────────
+
+function drawBeforeAfterOverlay() {
+  const ctx = overlayCanvas.getContext("2d");
+  ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  if (state.beforeAfterSplitX === null) return;
+
+  const x = Math.round(state.beforeAfterSplitX) + 0.5;
+  const h = overlayCanvas.height;
+
+  ctx.strokeStyle = "rgba(253,247,240,0.9)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, h);
+  ctx.stroke();
+
+  ctx.font = '11px "IBM Plex Mono", monospace';
+  ctx.fillStyle = "rgba(253,247,240,0.85)";
+  ctx.textAlign = "right";
+  ctx.fillText("BEFORE", Math.max(48, x - 8), 18);
+  ctx.textAlign = "left";
+  ctx.fillText("AFTER", Math.min(overlayCanvas.width - 4, x + 8), 18);
+}
 
 function drawOverlay() {
   const ctx = overlayCanvas.getContext("2d");
@@ -672,6 +770,10 @@ async function refreshExportEstimate() {
 // ─── Lifecycle callbacks for commands.js ──────────────────────────────────────
 
 function onImageReady() {
+  _adjustedFrameCache = null;
+  state.beforeAfterMode = false;
+  state.beforeAfterSplitX = null;
+  beforeAfterBtn.classList.remove("active");
   resetZoom();
   resetAdjustments(false);
   emptyState.style.display = "none";
@@ -685,9 +787,14 @@ function onImageReady() {
   updateUiState();
   scheduleRender();
   scheduleExportEstimate();
+  renderHistoryPanel();
 }
 
 function onWorkspaceCleared() {
+  _adjustedFrameCache = null;
+  state.beforeAfterMode = false;
+  state.beforeAfterSplitX = null;
+  beforeAfterBtn.classList.remove("active");
   resetAdjustments(false);
   resetZoom();
   updateHistogram();
@@ -702,6 +809,7 @@ function onWorkspaceCleared() {
   exportDimensions.textContent = "-";
   exportEstimate.textContent = "No image loaded";
   updateUiState();
+  renderHistoryPanel();
 }
 
 // ─── Inject UI callbacks into commands.js ─────────────────────────────────────
@@ -718,6 +826,7 @@ injectUI({
   onWorkspaceCleared,
   updateExportDisplay,
   formatBytes,
+  onHistoryChange,
 });
 
 // ─── Pointer interaction ──────────────────────────────────────────────────────
@@ -901,6 +1010,13 @@ overlayCanvas.addEventListener("pointerdown", (event) => {
 });
 
 overlayCanvas.addEventListener("pointermove", (event) => {
+  if (state.beforeAfterMode) {
+    const rect = overlayCanvas.getBoundingClientRect();
+    state.beforeAfterSplitX = (event.clientX - rect.left) / rect.width * overlayCanvas.width;
+    scheduleRender();
+    return;
+  }
+
   const pointer = getPointerPosition(event);
 
   // Cursor feedback when not dragging
@@ -962,6 +1078,12 @@ function releasePointer(event) {
 
 overlayCanvas.addEventListener("pointerup", releasePointer);
 overlayCanvas.addEventListener("pointercancel", releasePointer);
+overlayCanvas.addEventListener("pointerleave", () => {
+  if (state.beforeAfterMode) {
+    state.beforeAfterSplitX = null;
+    scheduleRender();
+  }
+});
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
@@ -1008,6 +1130,7 @@ adjustmentInputs.forEach((input) => {
     syncSliderOutputs();
     syncAdjustmentsFromInputs();
     updateUiState();
+    _adjustedFrameCache = null;
     scheduleRender();
     scheduleExportEstimate();
   });
@@ -1017,6 +1140,7 @@ adjustmentInputs.forEach((input) => {
     syncSliderOutputs();
     syncAdjustmentsFromInputs();
     updateUiState();
+    _adjustedFrameCache = null;
     scheduleRender();
     scheduleExportEstimate();
   });
@@ -1032,7 +1156,6 @@ exportCompressionInput.addEventListener("input", () => {
   scheduleExportEstimate();
 });
 
-applyAdjustmentsBtn.addEventListener("click", applyAdjustments);
 resetAdjustmentsBtn.addEventListener("click", () => {
   resetAdjustments(true);
   syncAdjustmentsFromInputs();
@@ -1083,6 +1206,23 @@ resetRotationBtn.addEventListener("click", () => {
 removeBgBtn.addEventListener("click", removeBackground);
 exportSaveBtn.addEventListener("click", exportImage);
 resetAllBtn.addEventListener("click", resetToOriginal);
+beforeAfterBtn.addEventListener("click", toggleBeforeAfter);
+
+// ─── Auto-commit on panel mouse-leave ─────────────────────────────────────────
+
+adjustmentsCard.addEventListener("mouseleave", () => {
+  if (!hasImage() || state.busy) return;
+  if (!slidersDiffer(state.adjustments, lastCommittedEditState)) return;
+  pushHistory("Adjustments");
+  renderHistoryPanel();
+});
+
+toneCurveCardEl.addEventListener("mouseleave", () => {
+  if (!hasImage() || state.busy) return;
+  if (!toneCurveDiffers(state.adjustments, lastCommittedEditState)) return;
+  pushHistory("Tone curve");
+  renderHistoryPanel();
+});
 
 // ─── Zoom / Pan events ───────────────────────────────────────────────────────
 
@@ -1148,12 +1288,19 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "\\" && !event.ctrlKey && !event.metaKey && !event.target.matches("input, select, textarea")) {
+    event.preventDefault();
+    toggleBeforeAfter();
+    return;
+  }
+
   if (state.busy) return;
   const ctrl = event.ctrlKey || event.metaKey;
   if (ctrl && !event.shiftKey && event.key === "z") {
     event.preventDefault();
     const snapshot = stepHistory(-1);
     if (snapshot) {
+      _adjustedFrameCache = null;
       syncInputsFromEditState();
       syncSliderOutputs();
       drawToneCurve();
@@ -1161,11 +1308,13 @@ document.addEventListener("keydown", (event) => {
       scheduleRender();
       scheduleExportEstimate();
       setStatus("History", snapshot.label, "ready");
+      renderHistoryPanel();
     }
   } else if (ctrl && (event.key === "y" || (event.shiftKey && event.key === "z"))) {
     event.preventDefault();
     const snapshot = stepHistory(1);
     if (snapshot) {
+      _adjustedFrameCache = null;
       syncInputsFromEditState();
       syncSliderOutputs();
       drawToneCurve();
@@ -1173,6 +1322,7 @@ document.addEventListener("keydown", (event) => {
       scheduleRender();
       scheduleExportEstimate();
       setStatus("History", snapshot.label, "ready");
+      renderHistoryPanel();
     }
   }
 });
@@ -1193,7 +1343,10 @@ histogramToggleBtn.addEventListener("click", () => {
   if (state.histogramVisible) updateHistogram();
 });
 
-window.addEventListener("resize", scheduleRender);
+window.addEventListener("resize", () => {
+  _adjustedFrameCache = null;
+  scheduleRender();
+});
 
 // ─── Tone curve interaction ───────────────────────────────────────────────────
 
@@ -1272,6 +1425,7 @@ toneCurveCanvas.addEventListener("pointermove", (event) => {
 
     pts[_tcDragIndex] = [newX, clamp(pt[1], 0, 255)];
 
+    _adjustedFrameCache = null;
     drawToneCurve();
     scheduleRender();
     scheduleExportEstimate();
@@ -1332,9 +1486,9 @@ tcPresetBtns.forEach((btn) => {
     const preset = TONE_CURVE_PRESETS[btn.dataset.preset];
     if (!preset) return;
     state.adjustments.toneCurve = cloneToneCurve(preset);
-    // Switch back to RGB tab
     _tcActiveChannel = "rgb";
     tcChannelBtns.forEach((b) => b.classList.toggle("active", b.dataset.channel === "rgb"));
+    _adjustedFrameCache = null;
     drawToneCurve();
     scheduleRender();
     scheduleExportEstimate();
@@ -1345,6 +1499,7 @@ toneCurveResetBtn.addEventListener("click", () => {
   state.adjustments.toneCurve = cloneToneCurve(DEFAULT_TONE_CURVE);
   _tcActiveChannel = "rgb";
   tcChannelBtns.forEach((b) => b.classList.toggle("active", b.dataset.channel === "rgb"));
+  _adjustedFrameCache = null;
   drawToneCurve();
   scheduleRender();
   scheduleExportEstimate();

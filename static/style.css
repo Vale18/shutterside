@@ -644,6 +644,42 @@ button {
   color: var(--accent-deep);
 }
 
+/* ─── History panel ────────────────────────────────────────────────────────── */
+
+.history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-item {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(34, 26, 18, 0.05);
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-item:hover {
+  background: rgba(34, 26, 18, 0.1);
+  color: var(--ink);
+}
+
+.history-item.is-active {
+  background: rgba(15, 123, 118, 0.14);
+  color: var(--teal);
+  font-weight: 500;
+}
+
 /* ─── Zoom chip ────────────────────────────────────────────────────────────── */
 
 .zoom-chip {

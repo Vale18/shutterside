@@ -42,6 +42,14 @@
           <p id="statusText">Load an image to start editing.</p>
         </section>
 
+        <section class="card history-card" id="historyCard">
+          <div class="card-head">
+            <h2>History</h2>
+            <span class="mini-pill">max 5</span>
+          </div>
+          <ol class="history-list" id="historyList"></ol>
+        </section>
+
         <section class="card histogram-card" id="histogramCard">
           <div class="card-head">
             <h2>Histogram</h2>
@@ -73,7 +81,7 @@
           </div>
         </section>
 
-        <section class="card">
+        <section class="card" id="adjustmentsCard">
           <div class="card-head">
             <h2>Adjustments</h2>
             <button class="ghost-btn" id="resetAdjustmentsBtn" type="button">Reset all</button>
@@ -111,7 +119,6 @@
             </label>
           </div>
 
-          <button class="primary-btn" id="applyAdjustmentsBtn" type="button">Bake adjustments</button>
         </section>
 
         <section class="card">
@@ -152,6 +159,7 @@
         <section class="toolbar-card">
           <div class="tool-row">
             <button class="tool-btn active" data-mode="preview" type="button">Preview</button>
+            <button class="tool-btn" id="beforeAfterBtn" type="button" title="Toggle before/after (\)">Before / After</button>
             <button class="tool-btn" data-mode="crop" type="button">Crop</button>
             <button class="tool-btn" id="rotateCcwBtn" type="button" title="90° gegen Uhrzeigersinn">&#x21ba;</button>
             <button class="tool-btn" id="rotateCwBtn" type="button" title="90° im Uhrzeigersinn">&#x21bb;</button>
