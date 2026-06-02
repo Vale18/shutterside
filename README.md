@@ -3,7 +3,7 @@
 A local-first browser image editor. Load a photo, make adjustments, export — nothing leaves your machine, no ads, 100% free.
 Similar to software like lightroom but free!
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-lightgrey) ![Vanilla JS](https://img.shields.io/badge/JS-ES%20Modules-yellow)
+![Python](https://img.shields.io/badge/Python-3.11%E2%80%933.14-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-lightgrey) ![Vanilla JS](https://img.shields.io/badge/JS-ES%20Modules-yellow)
 ![thumbnail](./examples/Screenshot%202026-04-02%20142058.png)
 ---
 
@@ -118,11 +118,11 @@ app.js  →  commands.js  →  api.js  →  app.py  →  image_ops.py
 | Flask | Web server and routing |
 | Pillow | Image encoding / decoding |
 | NumPy | Array operations for image processing |
-| OpenCV (`opencv-python`) | Perspective warp |
+| OpenCV (`opencv-python-headless`) | Perspective warp |
 | onnxruntime | Run U2Net background removal model |
 | rembg | Background removal pipeline wrapper |
 
-Optional dependencies (`opencv-python`, `onnxruntime`, `rembg`) are imported lazily — the app starts and works normally without them; only the specific features that need them will fail with a clear error message.
+Optional dependencies (`opencv-python-headless`, `onnxruntime`, `rembg`) are imported lazily — the app starts and works normally without them; only the specific features that need them will fail with a clear error message.
 
 ---
 
